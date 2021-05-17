@@ -31,6 +31,15 @@ typedef struct{
     Sparse::Vector b;
 } LinearSystem;
 
+enum{
+    T_ASSEMBLE = 0,
+    T_SOLVE,
+    T_PRECOND,
+    T_IO,
+    T_INIT,
+    T_UPDATE
+};
+
 const string tagNameTensor = "DIFFUSION_TENSOR";
 const string tagNameBC     = "BOUNDARY_CONDITION";
 const string tagNameRHS    = "RHS";
@@ -69,6 +78,9 @@ private:
     unsigned numDirNodes;
     unsigned size;        // size of resulting system = #nodes-#Dir.nodes
 
+    double times[10];
+    double ttt; // global timer
+
 public:
     Problem(string meshName);
     ~Problem();
@@ -82,20 +94,37 @@ public:
 
 Problem::Problem(string meshName)
 {
+    ttt = Timer();
+    for(int i = 0; i < 10; i++)
+        times[i] = 0.;
+
+    double t = Timer();
     m.Load(meshName);
     cout << "Number of cells: " << m.NumberOfCells() << endl;
     cout << "Number of faces: " << m.NumberOfFaces() << endl;
     cout << "Number of edges: " << m.NumberOfEdges() << endl;
     cout << "Number of nodes: " << m.NumberOfNodes() << endl;
     m.AssignGlobalID(NODE);
+    times[T_IO] += Timer() - t;
 }
 
 Problem::~Problem()
 {
+    printf("\n+=========================\n");
+    printf("| T_assemble = %lf\n", times[T_ASSEMBLE]);
+    printf("| T_precond  = %lf\n", times[T_PRECOND]);
+    printf("| T_solve    = %lf\n", times[T_SOLVE]);
+    printf("| T_IO       = %lf\n", times[T_IO]);
+    printf("| T_update   = %lf\n", times[T_UPDATE]);
+    printf("| T_init     = %lf\n", times[T_INIT]);
+    printf("+-------------------------\n");
+    printf("| T_total    = %lf\n", Timer() - ttt);
+    printf("+=========================\n");
 }
 
 void Problem::initProblem()
 {
+    double t = Timer();
     tagD     = m.CreateTag(tagNameTensor, DATA_REAL, CELL, NONE, 3);
     tagBC    = m.CreateTag(tagNameBC,     DATA_REAL, NODE, NODE, 1);
     tagSol   = m.CreateTag(tagNameSol,    DATA_REAL, NODE, NONE, 1);
@@ -136,11 +165,12 @@ void Problem::initProblem()
         node.Real(tagSol) = exactSolution(x);
     }
     cout << "Number of Dirichlet nodes: " << numDirNodes << endl;
+    times[T_INIT] += Timer() - t;
 }
 
 void Problem::assembleGlobalSystem()
 {
-
+    double t = Timer();
     Sparse::Matrix &A = linSys.A;
     Sparse::Vector &b = linSys.b;
     size = static_cast<unsigned>(m.NumberOfNodes())+1;
@@ -209,6 +239,7 @@ void Problem::assembleGlobalSystem()
             b[ind2] += bRHS(2,0);
         }
     }
+    times[T_ASSEMBLE] += Timer() - t;
 }
 
 rMatrix Problem::computeStiffMatrix(Cell &cell)
@@ -292,11 +323,15 @@ rMatrix Problem::integrateRHS(Cell &cell)
 void Problem::solveSystem()
 {
     Solver S("inner_ilu2");
+    double t = Timer();
     S.SetMatrix(linSys.A);
+    times[T_PRECOND] += Timer() - t;
     Sparse::Vector sol;
     cout << "size = " << size << endl;
     sol.SetInterval(0, size);
+    t = Timer();
     bool solved = S.Solve(linSys.b, sol);
+    times[T_SOLVE] += Timer() - t;
     if(!solved){
         cout << "Linear solver failed: " << S.GetReason() << endl;
         cout << "Residual: " << S.Residual() << endl;
@@ -304,6 +339,7 @@ void Problem::solveSystem()
     }
     cout << "Linear solver iterations: " << S.Iterations() << endl;
 
+    t = Timer();
     double Cnorm = 0.0;
     for(auto inode = m.BeginNode(); inode != m.EndNode(); inode++){
         if(inode->GetMarker(mrkDirNode))
@@ -313,11 +349,14 @@ void Problem::solveSystem()
         Cnorm = max(Cnorm, fabs(inode->Real(tagSol)-inode->Real(tagSolEx)));
     }
     cout << "|err|_C = " << Cnorm << endl;
+    times[T_UPDATE] += Timer() - t;
 }
 
 void Problem::saveSolution(string path)
 {
+    double t = Timer();
     m.Save(path);
+    times[T_IO] += Timer() - t;
 }
 
 
