@@ -1,5 +1,8 @@
 #include "inmost.h"
 
+//    !!!!!!! Currently NOT suited for parallel run
+//
+//
 //    This code solves boundary value problem
 //    for 2D Poisson equation in (0;1)x(0;1)
 //    using P1 FEM.
@@ -19,9 +22,17 @@
 using namespace INMOST;
 using namespace std;
 
+typedef struct{
+    Sparse::Matrix A;
+    Sparse::Vector b;
+} LinearSystem;
+
 const string tagNameTensor = "DIFFUSION_TENSOR";
 const string tagNameBC = "BOUNDARY_CONDITION";
 const string tagNameRHS = "RHS";
+const string tagNameDir = "DIRICHLET_NODE";
+
+const double bcA = 0., bcB = 1.;
 
 void setProblemParams(Mesh *m)
 {
@@ -37,8 +48,9 @@ void setProblemParams(Mesh *m)
     // Currently, D = I and BCs and RHS correspond to solution u(x,y) = x+1
 
     Tag tagD   = m->CreateTag(tagNameTensor, DATA_REAL, CELL, NONE, 3);
-    Tag tagBC  = m->CreateTag(tagNameBC,     DATA_REAL, FACE, FACE, 3);
+    Tag tagBC  = m->CreateTag(tagNameBC,     DATA_REAL, FACE|NODE, FACE|NODE, 3);
     Tag tagRHS = m->CreateTag(tagNameRHS,    DATA_REAL, CELL, NONE, 1);
+    Tag tagDir = m->CreateTag(tagNameDir,    DATA_INTEGER, NODE, NONE, 1);
 
     for(auto icell = m->BeginCell(); icell != m->EndCell(); icell++){
         if(icell->GetStatus() == Element::Ghost)
@@ -46,11 +58,10 @@ void setProblemParams(Mesh *m)
         icell->RealArray(tagD)[0] = 1.; // Dxx
         icell->RealArray(tagD)[1] = 1.; // Dyy
         icell->RealArray(tagD)[2] = 0.; // Dxy
-
-        icell->Real(tagRHS) = 0.;
     }
     m->ExchangeData(tagD, CELL);
 
+    int dirNodes = 0;
     for(auto iface = m->BeginFace(); iface != m->EndFace(); iface++){
         if(iface->GetStatus() == Element::Ghost || !iface->Boundary())
             continue;
@@ -60,12 +71,24 @@ void setProblemParams(Mesh *m)
         if(fabs(x[0] - 0.) < 1e-15){
             iface->RealArray(tagBC)[0] = 1.;
             iface->RealArray(tagBC)[1] = 0.;
-            iface->RealArray(tagBC)[2] = 1.;
+            iface->RealArray(tagBC)[2] = bcA;
+            auto nodes = iface->getNodes();
+            for(auto inode = nodes.begin(); inode != nodes.end(); inode++){
+                inode->Integer(tagDir) = 1;
+                inode->RealArray(tagBC)[2] = bcA;
+                dirNodes++;
+            }
         }
         else if(fabs(x[0] - 1.) < 1e-15){
             iface->RealArray(tagBC)[0] = 1.;
             iface->RealArray(tagBC)[1] = 0.;
-            iface->RealArray(tagBC)[2] = 2.;
+            iface->RealArray(tagBC)[2] = bcB;
+            auto nodes = iface->getNodes();
+            for(auto inode = nodes.begin(); inode != nodes.end(); inode++){
+                inode->Integer(tagDir) = 1;
+                inode->RealArray(tagBC)[2] = bcB;
+                dirNodes++;
+            }
         }
         else{
             iface->RealArray(tagBC)[0] = 0.;
@@ -73,7 +96,120 @@ void setProblemParams(Mesh *m)
             iface->RealArray(tagBC)[2] = 0.;
         }
     }
+    cout << "Number of Dirichlet nodes: " << dirNodes << endl;
 }
+
+rMatrix computeStiffMatrix(Cell &cell)
+{
+    ElementArray<Node> nodes = cell.getNodes();
+
+    double x0[2], x1[2], x2[2];
+    nodes[0].Barycenter(x0);
+    nodes[1].Barycenter(x1);
+    nodes[2].Barycenter(x2);
+
+    rMatrix Bk(2,2);
+    Bk(0,0) = x1[0] - x0[0]; //x2 - x1;
+    Bk(0,1) = x2[0] - x0[0]; //x3 - x1;
+    Bk(1,0) = x1[1] - x0[1]; //y2 - y1;
+    Bk(1,1) = x2[1] - x0[1]; //y3 - y1;
+
+    rMatrix Ck = Bk.Invert() * Bk.Invert().Transpose();
+
+    double detBk = Bk(0,0)*Bk(1,1) - Bk(0,1)*Bk(1,0);
+
+    rMatrix Kee(3,3), Knn(3,3), Ken(3,3);
+    Kee.Zero();
+    Knn.Zero();
+    Ken.Zero();
+
+    Kee(0,0) = Kee(1,1) =  1.;
+    Kee(0,1) = Kee(1,0) = -1.;
+    Knn(0,0) = Knn(2,2) =  1.;
+    Knn(0,2) = Knn(2,0) = -1.;
+    Ken(0,0) = Ken(1,2) =  1.;
+    Ken(1,0) = Ken(0,2) = -1.;
+
+    Kee *= 0.5;
+    Knn *= 0.5;
+    Ken *= 0.5;
+
+    rMatrix M(3,3);
+    M = Ck(0,0)*Kee + Ck(1,1)*Knn + Ck(0,1)*(Ken + Ken.Transpose());
+    M *= fabs(detBk);
+
+    return M;
+}
+
+LinearSystem *assembleSystem(Mesh *m)
+{
+    LinearSystem *System = new LinearSystem;
+    Sparse::Matrix &A = System->A;
+    Sparse::Vector &b = System->b;
+    A.SetInterval(0, static_cast<unsigned>(m->NumberOfNodes()));
+    b.SetInterval(0, static_cast<unsigned>(m->NumberOfNodes()));
+    Tag tagDir = m->GetTag(tagNameDir);
+    Tag tagBC  = m->GetTag(tagNameBC);
+    for(auto icell = m->BeginCell(); icell != m->EndCell(); icell++){
+        if(icell->GetStatus() == Element::Ghost)
+            continue;
+        Cell cell = icell->getAsCell();
+
+        ElementArray<Node> nodes = icell->getNodes();
+        rMatrix stiffMatrix = computeStiffMatrix(cell);
+
+//        cout << "stiffness matrix for cell " << cell.LocalID() << ":" << endl;
+//        stiffMatrix.Print();
+//        cout << endl << endl;
+
+        unsigned ind0 = static_cast<unsigned>(nodes[0].LocalID());
+        unsigned ind1 = static_cast<unsigned>(nodes[1].LocalID());
+        unsigned ind2 = static_cast<unsigned>(nodes[2].LocalID());
+        if(nodes[0].Integer(tagDir) == 1){
+            // There's no row corresponding to nodes[0]
+            double bcVal = nodes[0].RealArray(tagBC)[2];
+            if(nodes[1].Integer(tagDir) != 1)
+                b[ind1] -= bcVal * stiffMatrix(1,0);
+            if(nodes[2].Integer(tagDir) != 1)
+                b[ind2] -= bcVal * stiffMatrix(2,0);
+        }
+        else{
+            A[ind0][ind0] += stiffMatrix(0,0);
+            A[ind0][ind1] += stiffMatrix(1,0);
+            A[ind0][ind2] += stiffMatrix(2,0);
+        }
+
+        if(nodes[1].Integer(tagDir) == 1){
+            // Dirichlet node
+            double bcVal = nodes[1].RealArray(tagBC)[2];
+            if(nodes[0].Integer(tagDir) != 1)
+                b[ind0] -= bcVal * stiffMatrix(0,1);
+            if(nodes[2].Integer(tagDir) != 1)
+                b[ind2] -= bcVal * stiffMatrix(2,1);
+        }
+        else{
+            A[ind1][ind0] += stiffMatrix(0,1);
+            A[ind1][ind1] += stiffMatrix(1,1);
+            A[ind1][ind2] += stiffMatrix(2,1);
+        }
+
+        if(nodes[2].Integer(tagDir) == 1){
+            // Dirichlet node
+            double bcVal = nodes[2].RealArray(tagBC)[2];
+            if(nodes[1].Integer(tagDir) != 1)
+                b[ind1] -= bcVal * stiffMatrix(1,2);
+            if(nodes[0].Integer(tagDir) != 1)
+                b[ind0] -= bcVal * stiffMatrix(0,2);
+        }
+        else{
+            A[ind2][ind0] += stiffMatrix(0,2);
+            A[ind2][ind1] += stiffMatrix(1,2);
+            A[ind2][ind2] += stiffMatrix(2,2);
+        }
+    }
+    return System;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -88,8 +224,43 @@ int main(int argc, char *argv[])
     cout << "Number of faces: " << mesh.NumberOfFaces() << endl;
     cout << "Number of edges: " << mesh.NumberOfEdges() << endl;
     cout << "Number of nodes: " << mesh.NumberOfNodes() << endl;
+    mesh.AssignGlobalID(NODE);
 
     setProblemParams(&mesh);
+
+    Tag U = mesh.CreateTag("SOLUTION", DATA_REAL, NODE, NONE, 1);
+    Tag tagDir = mesh.GetTag(tagNameDir);
+    Tag tagBC  = mesh.GetTag(tagNameBC);
+
+    LinearSystem *System = assembleSystem(&mesh);
+    cout << "Number of unknowns: " << System->b.Size() << endl;
+
+    Solver S("inner_ilu2");
+    S.SetParameter("relative_tolerance", "1e-9");
+    S.SetParameter("absolute_tolerance", "1e-12");
+    S.SetMatrix(System->A);
+    Sparse::Vector sol;
+    sol.SetInterval(0, static_cast<unsigned>(mesh.NumberOfNodes()));
+    bool solved = S.Solve(System->b, sol);
+    if(!solved){
+        cout << "Linear solver failed: " << S.GetReason() << endl;
+        cout << "Residual: " << S.Residual() << endl;
+        exit(1);
+    }
+    cout << "Linear iterations: " << S.Iterations() << endl;
+
+    for(auto inode = mesh.BeginNode(); inode != mesh.EndNode(); inode++){
+        if(inode->GetStatus() == Element::Ghost)
+            continue;
+
+        //cout << "node " << inode->LocalID() << ": b = " << System->b[inode->LocalID()] << endl;
+
+        if(inode->Integer(tagDir) == 1)
+            inode->Real(U) = inode->RealArray(tagBC)[2];
+        else
+            inode->Real(U) = sol[static_cast<unsigned>(inode->LocalID())];
+    }
+
 
     mesh.Save("res.vtk");
 
