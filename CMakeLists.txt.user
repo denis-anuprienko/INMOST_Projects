@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE QtCreatorProject>
-<!-- Written by QtCreator 4.8.0, 2021-05-17T18:59:49. -->
+<!-- Written by QtCreator 4.8.0, 2021-05-17T19:17:32. -->
 <qtcreator>
  <data>
   <variable>EnvironmentId</variable>
@@ -405,7 +405,7 @@ C:/Users/Denis/Documents/repos/INMOST_Projects/</value>
     <value type="QString" key="ProjectExplorer.ProjectConfiguration.DisplayName"></value>
     <value type="QString" key="ProjectExplorer.ProjectConfiguration.Id">CMakeProjectManager.CMakeRunConfiguration.2d_diffusion_fem
 C:/Users/Denis/Documents/repos/INMOST_Projects/</value>
-    <value type="QString" key="RunConfiguration.Arguments">..\INMOST_Projects\unit_square1.vtk</value>
+    <value type="QString" key="RunConfiguration.Arguments">..\INMOST_Projects\meshes\unit_square1.vtk</value>
     <value type="uint" key="RunConfiguration.QmlDebugServerPort">3768</value>
     <value type="bool" key="RunConfiguration.UseCppDebugger">false</value>
     <value type="bool" key="RunConfiguration.UseCppDebuggerAuto">true</value>
