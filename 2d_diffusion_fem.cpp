@@ -34,7 +34,6 @@ typedef struct{
 const string tagNameTensor = "DIFFUSION_TENSOR";
 const string tagNameBC     = "BOUNDARY_CONDITION";
 const string tagNameRHS    = "RHS";
-const string tagNameDir    = "DIRICHLET_NODE";
 const string tagNameSol    = "SOLUTION";
 const string tagNameSolEx  = "SOLUTION_EXACT";
 
@@ -319,10 +318,6 @@ void Problem::solveSystem()
 void Problem::saveSolution(string path)
 {
     m.Save(path);
-}
-
-void setProblemParams(Mesh *m)
-{
 }
 
 
