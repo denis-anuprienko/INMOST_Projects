@@ -46,18 +46,25 @@ const string tagNameRHS    = "RHS";
 const string tagNameSol    = "SOLUTION";
 const string tagNameSolEx  = "SOLUTION_EXACT";
 
-const double Dxx = 1e2;
-const double Dyy = 1e0;
-const double Dxy = 0e0;
+
+// Corresponds to tensor
+// [ 1  0 ]
+// [ 0 10 ]
+// rotated by M_PI/6
+const double Dxx = 3.25;
+const double Dyy = -0.433013;
+const double Dxy = 0.25;
+
+const double M_PI = 3.1415926535898;
 
 double exactSolution(double *x)
 {
-    return x[0]*x[0];
+    return sin(M_PI*x[0]) * sin(M_PI*x[1]);
 }
 
 double exactSolutionRHS(double *x)
 {
-    return -2*Dxx;
+    return M_PI*M_PI * ((Dxx+Dyy) * exactSolution(x) - 2*Dxy*cos(M_PI*x[0])*cos(M_PI*x[1]));
 }
 
 class Problem
