@@ -138,10 +138,15 @@ void Problem::initProblem()
     tagSolEx = m.CreateTag(tagNameSolEx,  DATA_REAL, NODE, NONE, 1);
     tagRHS   = m.CreateTag(tagNameRHS,    DATA_REAL, NODE, NONE, 1);
 
-    // Set diffusion tensor
+    // Set diffusion tensor,
+    // also check that all cells are triangles
     for(auto icell = m.BeginCell(); icell != m.EndCell(); icell++){
         if(icell->GetStatus() == Element::Ghost)
             continue;
+        if(icell->getNodes().size() != 3){
+            cout << "Non-triangular cell" << endl;
+            exit(1);
+        }
         icell->RealArray(tagD)[0] = Dxx; // Dxx
         icell->RealArray(tagD)[1] = Dyy; // Dyy
         icell->RealArray(tagD)[2] = Dxy; // Dxy
