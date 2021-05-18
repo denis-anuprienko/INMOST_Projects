@@ -16,10 +16,9 @@
 //    - eps   is strain tensor, a 2x2 matrix
 //    - U     is displacement vector of size 2
 //    - C     is 4th order elastic tensor of the form
-//      [ 2*mu+lam        lam     0     0]
-//      [      lam   2*mu+lam     0     0]
-//      [        0          0    mu     0]
-//      [        0          0     0    mu]
+//      [ 2*mu+lam        lam     0 ]
+//      [      lam   2*mu+lam     0 ]
+//      [        0          0  2*mu ]
 //
 //
 //    The user should provide 2D triangular mesh
@@ -67,7 +66,7 @@ void exactSolution(double *x, double *res)
 
 void exactSolutionRHS(double *x, double *res)
 {
-    res[0] = 0.0;
+    res[0] = -3e7;
     res[1] = 0.0;
 }
 
@@ -100,8 +99,7 @@ public:
     ~Problem();
     void initProblem(); // create tags and set parameters
     void assembleGlobalSystem(); // assemble global linear system
-    rMatrix computeW(Cell &);
-    rMatrix integrateRHS(Cell &);
+    void assembleLocalSystem(Cell &, rMatrix &, rMatrix &);
     void solveSystem();
     void saveSolution(string path); // save mesh with solution
 };
@@ -141,7 +139,7 @@ void Problem::initProblem()
     double t = Timer();
     tagC      = m.CreateTag(tagNameTensor, DATA_REAL, CELL, NONE, 9);
     tagBC     = m.CreateTag(tagNameBC,     DATA_REAL, NODE, NODE, 2);
-    tagSol    = m.CreateTag(tagNameSol,    DATA_REAL, NODE, NONE, 2);
+    tagSol    = m.CreateTag(tagNameSol,    DATA_REAL, NODE, NONE, 3);
     tagSolEx  = m.CreateTag(tagNameSolEx,  DATA_REAL, NODE, NONE, 2);
     tagRHS    = m.CreateTag(tagNameRHS,    DATA_REAL, NODE, NONE, 2);
     tagStress = m.CreateTag(tagNameStress, DATA_REAL, NODE, NONE, 3);
@@ -227,8 +225,12 @@ void Problem::assembleGlobalSystem()
             continue;
         Cell cell = icell->getAsCell();
 
+        //printf("cell %d, vol = %e\n", cell.LocalID(), cell.Volume());
+
         ElementArray<Node> nodes = icell->getNodes();
-        rMatrix W = computeW(cell);
+        rMatrix W(6,6);
+        rMatrix rhs(6,1);
+        assembleLocalSystem(cell, W, rhs);
 
         if(!W.isSymmetric()){
             printf("Nonsymm W\n");
@@ -269,6 +271,9 @@ void Problem::assembleGlobalSystem()
             R[Uy.Index(nodes[0])] += W(1,3)*Uy(nodes[1]);
             R[Uy.Index(nodes[0])] += W(1,4)*Ux(nodes[2]);
             R[Uy.Index(nodes[0])] += W(1,5)*Uy(nodes[2]);
+
+            R[Ux.Index(nodes[0])] -= rhs(0,0);
+            R[Uy.Index(nodes[0])] -= rhs(1,0);
 
 //            R[Ux.Index(nodes[0])] += W(0,0)*Ux(nodes[0]);
 //            R[Ux.Index(nodes[0])] += W(0,1)*Ux(nodes[1]);
@@ -316,6 +321,9 @@ void Problem::assembleGlobalSystem()
             R[Uy.Index(nodes[1])] += W(3,4)*Ux(nodes[2]);
             R[Uy.Index(nodes[1])] += W(3,5)*Uy(nodes[2]);
 
+            R[Ux.Index(nodes[1])] -= rhs(2,0);
+            R[Uy.Index(nodes[1])] -= rhs(3,0);
+
 //            R[Ux.Index(nodes[1])] += W(2,0)*Ux(nodes[0]);
 //            R[Ux.Index(nodes[1])] += W(2,1)*Ux(nodes[1]);
 //            R[Ux.Index(nodes[1])] += W(2,2)*Ux(nodes[2]);
@@ -361,6 +369,9 @@ void Problem::assembleGlobalSystem()
             R[Uy.Index(nodes[2])] += W(5,4)*Ux(nodes[2]);
             R[Uy.Index(nodes[2])] += W(5,5)*Uy(nodes[2]);
 
+            R[Ux.Index(nodes[2])] -= rhs(4,0);
+            R[Uy.Index(nodes[2])] -= rhs(5,0);
+
 //            R[Ux.Index(nodes[2])] += W(4,0)*Ux(nodes[0]);
 //            R[Ux.Index(nodes[2])] += W(4,1)*Ux(nodes[1]);
 //            R[Ux.Index(nodes[2])] += W(4,2)*Ux(nodes[2]);
@@ -378,7 +389,7 @@ void Problem::assembleGlobalSystem()
     times[T_ASSEMBLE] += Timer() - t;
 }
 
-rMatrix Problem::computeW(Cell &cell)
+void Problem::assembleLocalSystem(Cell &cell, rMatrix &W, rMatrix &rhs)
 {
     ElementArray<Node> nodes = cell.getNodes();
 
@@ -438,13 +449,29 @@ rMatrix Problem::computeW(Cell &cell)
 //    exit(1);
 
     double detA = A(0,0)*A(1,1)*A(2,2) + A(0,1)*A(1,2)*A(2,0) + A(0,2)*A(1,0)*A(2,1);
-    detA -= A(0,2)*A(1,1)*A(2,0) + A(2,1)*A(1,2)*A(0,0) + A(2,2)*A(1,0)*A(0,1);
+    detA       -= A(0,2)*A(1,1)*A(2,0) + A(2,1)*A(1,2)*A(0,0) + A(2,2)*A(1,0)*A(0,1);
 
 
-    return detA * 0.5 * R.Transpose() * Ck * R;
+    W = detA * 0.5 * R.Transpose() * Ck * R;
+
+    // rhs assembly
+    rMatrix Bk(2,2);
+    Bk(0,0) = x1[0] - x0[0]; //x2 - x1;
+    Bk(0,1) = x2[0] - x0[0]; //x3 - x1;
+    Bk(1,0) = x1[1] - x0[1]; //y2 - y1;
+    Bk(1,1) = x2[1] - x0[1]; //y3 - y1;
+
+    double detBk = Bk(0,0)*Bk(1,1) - Bk(0,1)*Bk(1,0);
+    rhs(0,0) = nodes[0].RealArray(tagRHS)[0] + nodes[1].RealArray(tagRHS)[0] + nodes[2].RealArray(tagRHS)[0];
+    rhs(1,0) = nodes[0].RealArray(tagRHS)[1] + nodes[1].RealArray(tagRHS)[1] + nodes[2].RealArray(tagRHS)[1];
+    rhs(2,0) = rhs(0,0);
+    rhs(3,0) = rhs(1,0);
+    rhs(4,0) = rhs(0,0);
+    rhs(5,0) = rhs(1,0);
+    rhs *= fabs(detBk) / 18.;
 }
 
-rMatrix Problem::integrateRHS(Cell &cell)
+rMatrix integrateRHS(Cell &cell)
 {
     rMatrix res(3,1);
 
@@ -476,30 +503,30 @@ rMatrix Problem::integrateRHS(Cell &cell)
 void Problem::solveSystem()
 {
     Solver S("inner_mptiluc");
-    S.SetParameter("relative_tolerance", "1e-9");
-    S.SetParameter("absolute_tolerance", "1e-12");
+    S.SetParameter("relative_tolerance", "1e-12");
+    S.SetParameter("absolute_tolerance", "1e-15");
     double t = Timer();
     S.SetMatrix(R.GetJacobian());
     times[T_PRECOND] += Timer() - t;
     Sparse::Vector sol;
     sol.SetInterval(aut.GetFirstIndex(), aut.GetLastIndex());
 
-    Sparse::Matrix &A = R.GetJacobian();
-    unsigned N = sol.Size();
-    rMatrix M(N,N);
-    for(unsigned i = 0; i < N; i++)
-        for(unsigned j = 0; j < N; j++)
-            M(i,j) = A[i][j];
+//    Sparse::Matrix &A = R.GetJacobian();
+//    unsigned N = sol.Size();
+//    rMatrix M(N,N);
+//    for(unsigned i = 0; i < N; i++)
+//        for(unsigned j = 0; j < N; j++)
+//            M(i,j) = A[i][j];
 
-    if(!M.isSymmetric()){
-        M.Print();
-        printf("Global matrix is not symmetric\n");
-        exit(1);
-    }
+//    if(!M.isSymmetric()){
+//        M.Print();
+//        printf("Global matrix is not symmetric\n");
+//        exit(1);
+//    }
 
 
     for(unsigned i = 0; i < sol.Size(); i++){
-        sol[i] = 1;
+        sol[i] = i;
         //cout << "b["<<i<<"] = " << R.GetResidual()[i] << endl;
     }
     t = Timer();
@@ -513,11 +540,11 @@ void Problem::solveSystem()
     cout << "Linear solver iterations: " << S.Iterations() << endl;
 
 
-    for(unsigned i = 0; i < sol.Size(); i++){
-        if(fabs(sol[i]) > 1e-10){
-            printf("Bad sol[%d] = %e\n", i, sol[i]);
-        }
-    }
+//    for(unsigned i = 0; i < sol.Size(); i++){
+//        if(fabs(sol[i]) > 1e-10){
+//            printf("Bad sol[%d] = %e\n", i, sol[i]);
+//        }
+//    }
 
     t = Timer();
     double Cnorm = 0.0;
@@ -528,6 +555,10 @@ void Problem::solveSystem()
         inode->RealArray(tagSol)[0] -= sol[Ux.Index(inode->getAsNode())];
         inode->RealArray(tagSol)[1] -= sol[Uy.Index(inode->getAsNode())];
         //Cnorm = max(Cnorm, fabs(inode->Real(tagSol)-inode->Real(tagSolEx)));
+
+        auto coords = inode->Coords();
+        coords[0] += inode->RealArray(tagSol)[0];
+        coords[1] += inode->RealArray(tagSol)[1];
     }
     cout << "|err|_C = " << Cnorm << endl;
     times[T_UPDATE] += Timer() - t;
