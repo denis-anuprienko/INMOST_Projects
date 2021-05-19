@@ -554,11 +554,8 @@ void Problem::solveSystem()
 
         inode->RealArray(tagSol)[0] -= sol[Ux.Index(inode->getAsNode())];
         inode->RealArray(tagSol)[1] -= sol[Uy.Index(inode->getAsNode())];
-        //Cnorm = max(Cnorm, fabs(inode->Real(tagSol)-inode->Real(tagSolEx)));
-
-        auto coords = inode->Coords();
-        coords[0] += inode->RealArray(tagSol)[0];
-        coords[1] += inode->RealArray(tagSol)[1];
+        Cnorm = max(Cnorm, fabs(inode->RealArray(tagSol)[0]-inode->RealArray(tagSolEx)[0]));
+        Cnorm = max(Cnorm, fabs(inode->RealArray(tagSol)[1]-inode->RealArray(tagSolEx)[1]));
     }
     cout << "|err|_C = " << Cnorm << endl;
     times[T_UPDATE] += Timer() - t;
@@ -568,6 +565,15 @@ void Problem::saveSolution(string path)
 {
     double t = Timer();
     m.Save(path);
+
+    for(auto inode = m.BeginNode(); inode != m.EndNode(); inode++){
+        auto coords = inode->Coords();
+        coords[0] += inode->RealArray(tagSol)[0];
+        coords[1] += inode->RealArray(tagSol)[1];
+    }
+
+    m.Save("deformed.vtk");
+
     times[T_IO] += Timer() - t;
 }
 
