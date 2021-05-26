@@ -7,3 +7,4 @@ This repository will contain small files with simplest implementation of numeric
 - FEM for 3D linear elasticity
 - VEM for 3D diffusion
 - VEM for 3D linear elasticity
+- FVM for 2D density driven flow, can be solved with either fully implicit (FIM) or sequential implicit (SIM) approach
