@@ -48,22 +48,22 @@ const string tagNameFlux   = "FLUX";
 // [ 0 10 ]
 // rotated by M_PI/6
 const double Dxx = 1.0;//3.25;
-const double Dyy = 1.0;//-0.433013;
+const double Dyy = 10.0;//-0.433013;
 const double Dxy = 0.0;//0.25;
 
 const double M_PI = 3.1415926535898;
 
 double exactSolution(double *x)
 {
-    return x[0]*x[0];//sin(M_PI*x[0]) * sin(M_PI*x[1]);
+    return x[0];//sin(M_PI*x[0]) * sin(M_PI*x[1]);
 }
 
 double exactFlux(Face &f)
 {
     double x[2], n[2];
     f.Barycenter(x);
-    f.Normal(n);
-    double flux[2] = {-2.*x[0], 0.};
+    f.UnitNormal(n);
+    double flux[2] = {-1., 0.};
     return flux[0]*n[0] + flux[1]*n[1];
 }
 
@@ -195,21 +195,35 @@ void Problem::assembleGlobalSystem()
         // nf x nf matrix defining flux inner product
         rMatrix MF;
         assembleLocalSystem(cell, MF);
+//        MF.Zero();
+//        for(unsigned i = 0; i < nf; i++)
+//            MF(i,i) = cell.Volume();
 
         // Equations for flux: div_h u_h = 0 - assigned to cells
+        int x = 0;
         for(auto f = faces.begin(); f != faces.end(); f++){
             double a = cell == f->FrontCell() ? -1. : 1.;
             a *= f->Area() / cell.Volume();
             R[varP.Index(cell)] += a * varU(f->getAsFace());
+            x++;
         }
+//        if(x != 4 || nf != 4){
+//            cout << "x = " << x << endl;
+//        }
+//        double xP[2];
+//        cell.Barycenter(xP);
+//        R[varP.Index(cell)] = varP(cell) - exactSolution(xP);
 
         // Equations for pressure ~grad_h * [p Lambda] = 0 - assigned to faces
         Matrix<variable> res(nf,1);
+        bool bnd = false;
         for(unsigned i = 0; i < nf; i++){
             Face f = faces[i];
+            if(f.Boundary())
+                bnd = true;
             double a = (cell == f->FrontCell() ? -1. : 1.);
-            a *= f.Area();
-            double lam = 1.0;
+            a *= f.Area();// / cell.Volume();
+            double lam = 0.0;
             if(f.Boundary()){
                 double x[2];
                 f.Barycenter(x);
@@ -218,21 +232,49 @@ void Problem::assembleGlobalSystem()
             }
             res(i,0) = a * (varP(cell) - lam);
         }
-        res = -MF.Invert() * res;
+        //if(!bnd)
+        //    res = -MF.Invert() * res;
+        //else
+        //    res *= cell.Volume();
 
-        //res.Print();
-        //exit(1);
+//        res.Print();
+//        exit(1);
 
+        // res contains action of local derived
+        // gradient operator
+        // on faces
+
+//        for(unsigned i = 0; i < nf; i++){
+//            Face f = faces[i];
+//            R[varU.Index(f)] += res(i,0);
+//            //R[varP.Index(f)] += varP(f) - 0.0;
+//            R[varU.Index(f)] += varU(f);
+//        }
+
+
+
+
+
+
+        // NEW formulartion
+        Matrix<variable> uc(nf,1);
         for(unsigned i = 0; i < nf; i++){
             Face f = faces[i];
-            R[varU.Index(f)] += res(i,0);
-            //R[varP.Index(f)] += varP(f) - 0.0;
+            uc(i,0) = varU(f);
+        }
+//        res.Print();
+//        exit(1);
+        uc = MF * uc - res;
+        //uc = uc - res;
+        for(unsigned i = 0; i < nf; i++){
+            Face f = faces[i];
+            R[varU.Index(f)] += uc(i,0);
         }
     }
 
     for(auto iface = m.BeginFace(); iface != m.EndFace(); iface++){
         Face f = iface->getAsFace();
-        R[varU.Index(f)] += varU(f);
+        //R[varU.Index(f)] += varU(f);// - exactFlux(f);
     }
     times[T_ASSEMBLE] += Timer() - t;
 }
@@ -265,13 +307,20 @@ void Problem::assembleLocalSystem(Cell &cell, rMatrix &MF)
         NP(i,1) = n[1];
 
         double a = (cell == faces[i].FrontCell()) ? -1. : 1.;
-        a *= faces[i].Area();
+        a *= faces[i].Area();// / cell.Volume();
         RP(i,0) = a * (xf[0] - xP[0]);
         RP(i,1) = a * (xf[1] - xP[1]);
     }
     NP = NP * D;
+    //NP = D * NP;
 
-//    rMatrix test = NP.Transpose() * RP - cell.Volume() * D;
+    //rMatrix test = NP.Transpose() * RP - cell.Volume() * D;
+    rMatrix test = RP.Transpose()*NP - cell.Volume() * D;
+    double diff;
+    if((diff = test.FrobeniusNorm()) > 1e-3){
+        cout << "Bad test: diff = " << diff << endl;
+        exit(1);
+    }
 //    test.Print();
 //    exit(1);
 
@@ -283,12 +332,18 @@ void Problem::assembleLocalSystem(Cell &cell, rMatrix &MF)
     //cout << "tr = " << I.Trace() << endl;
     //I.Print();
     //exit(1);
-    MP0 = RP * (1./cell.Volume() * D.Invert()) * RP.Transpose();
-    double gammaP = (RP * D.Invert() * RP.Transpose()).Trace() / nf / cell.Volume() * 2.;
+
+    //MP0 = RP * (1./cell.Volume() * D.Invert()) * RP.Transpose();
+    MP0 = RP * (RP.Transpose()*NP).Invert() * RP.Transpose();
+
+    //double gammaP = 2*(RP * D.Invert() * RP.Transpose()).Trace() / nf / cell.Volume();// * 2.;
+    double gammaP = MP0.Trace() / nf;
     MP1 = gammaP * (I - NP * (NP.Transpose()*NP).Invert() * NP.Transpose());
     MP = MP0 + MP1;
 
     MF = MP;
+//    MF.Print();
+//    cout << endl;
 }
 
 
@@ -326,25 +381,37 @@ void Problem::solveSystem()
     Solver S("inner_mptiluc");
     S.SetParameter("maximum_iterations", "10000");
     double t = Timer();
-    S.SetMatrix(R.GetJacobian());
 
     Sparse::Matrix &J = R.GetJacobian();
-//    ofstream oo("MAT.txt");
-//    unsigned N = R.GetLastIndex();
-//    cout << "N = " << N << endl;
+    ofstream oo("MAT.txt");
+    unsigned N = R.GetLastIndex();
+    cout << "N = " << N << endl;
+
+
 //    for(unsigned i = 0; i < N; i++){
-//        for(unsigned j = 0; j < N; j++)
+//        for(unsigned j = 0; j < i; j++)
+//            J[i][j] = J[j][i];
+//    }
+
+//    double nnz = 0.0;
+//    for(unsigned i = 0; i < N; i++){
+//        for(unsigned j = 0; j < N; j++){
 //            oo << J[i][j] << " ";
+//            if(fabs(J[i][j]) > 1e-10)
+//                nnz += 1.0;
+//        }
 //        oo << endl;
 //    }
 //    oo.close();
+//    printf("Average nnz per row: %lf\n", nnz/N);
 
+    S.SetMatrix(J);
     //R.GetResidual().Save("J.mtx");
     times[T_PRECOND] += Timer() - t;
     Sparse::Vector sol;
     sol.SetInterval(aut.GetFirstIndex(), aut.GetLastIndex());
     for(unsigned i = 0; i < sol.Size(); i++){
-        sol[i] = 0;//rand();
+        sol[i] = i;//rand();
     }
     printf("System size is %d\n", (sol.Size()));
     t = Timer();
