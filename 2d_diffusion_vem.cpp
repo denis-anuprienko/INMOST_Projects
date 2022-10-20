@@ -52,7 +52,9 @@ const double Dxx = 1;//3.25;
 const double Dxy = 0;//-0.433013;
 const double Dyy = 1;//0.25;
 
+#ifndef M_PI
 const double M_PI = 3.1415926535898;
+#endif
 
 double exactSolution(double *x)
 {
