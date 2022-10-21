@@ -201,7 +201,8 @@ void Problem::initProblem()
         Node node = inode->getAsNode();
         double x[3];
         node.Barycenter(x);
-        node.Real(tagSol) = node.Real(tagSolEx) = exactSolution(x);
+        node.Real(tagSolEx) = exactSolution(x);
+        node.Real(tagSol) = 0.0;
 
 	if(node.nbAdjElements(FACE, mrkDirNode))
 	{
@@ -366,6 +367,7 @@ void Problem::solveSystem()
         inode->Real(tagSol) -= sol[var.Index(inode->self())];
         Cnorm = std::max(Cnorm, fabs(inode->Real(tagSol)-inode->Real(tagSolEx)));
     }
+    m.ExchangeData(tagSol, NODE);
     Cnorm = m.AggregateMax(Cnorm);
     if(rank == 0) std::cout << "|err|_C = " << Cnorm << std::endl;
     times[T_UPDATE] += Timer() - t;
