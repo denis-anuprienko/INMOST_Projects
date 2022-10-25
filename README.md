@@ -8,10 +8,10 @@ Already implemented:
 - ```2d_diffusion_vem.cpp``` - Virtual element method for 2D Poisson problem. Uses node-based pressure (or concentration) unknowns and is implemented in accordance with very helpful paper 'The Virtual Element Method in 50 lines of MATLAB' (see, for example, https://arxiv.org/abs/1604.06021)
 - ```2d_elasticity_fem.cpp``` - FEM for 2D linear elasticity (done for linear triangular elements and either Dirichlet BC or zero Neumann BC following https://link.springer.com/article/10.1007/s00607-002-1459-8)
 - ```2d_dens_driven_flow.cpp``` - FVM for 2D density-driven flow. Uses two-point flux approximation (TPFA) for diffusion and flow in porous medium and simple upwind scheme for advection. Can be run on wide range of polygonal meshes, not only triangular. For solution of coupled problems either fully implicit or sequential implicit strategies can be used.
+- ```3d_diffusion_vem.cpp``` - Virtual element method for 3D Poisson problem, same as for 2D, except some adjustments.
 
 Future plans:
 - FEM for 3D diffusion
 - FVM (TPFA) for 3D diffusion equation 
 - FEM for 3D linear elasticity
-- VEM for 3D diffusion
 - VEM for 3D linear elasticity
